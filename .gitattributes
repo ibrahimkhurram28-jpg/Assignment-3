@@ -1,0 +1,6 @@
+# Keep Unix line endings for files used inside the Linux container.
+* text=auto
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.sql text eol=lf
+*.prisma text eol=lf
