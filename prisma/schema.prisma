@@ -1,0 +1,172 @@
+// Phoneme Builder: database schema (Assessments 2 and 3)
+//
+// Design notes
+// - Phonemes are stored as rows in their own table, not as characters in a
+//   string. Symbols such as "tʃ", "aɪ" or "iː" span more than one character,
+//   so each one is kept as a single unit.
+// - A word's pronunciation is an ordered list of WordPhoneme rows
+//   (word + position -> phoneme), so "chair" is stored as [tʃ, eə].
+// - Word lists group words. Activity configurations point at a word list,
+//   choose a subset of its words, and hold the Wordle or Word Search settings.
+// - Every HTML generation (successful or failed) is recorded in GenerationLog.
+// - Assessment 3 adds PageVisit (time on page) and a `simulated` flag so that
+//   simulated input records can be told apart from real use and cleared again.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum PhonemeCategory {
+  CONSONANT
+  VOWEL
+}
+
+enum ActivityType {
+  WORDLE
+  WORD_SEARCH
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum GenerationStatus {
+  SUCCESS
+  FAILED
+}
+
+enum GenerationKind {
+  DOWNLOAD
+  VIEW
+}
+
+model Phoneme {
+  id        Int             @id @default(autoincrement())
+  symbol    String          @unique // IPA symbol, may be several characters (e.g. "tʃ")
+  label     String // plain-letter spelling used for hints and word search letters (e.g. "CH")
+  example   String // example English word (e.g. "chip")
+  category  PhonemeCategory
+  sortOrder Int             @default(0)
+  usages    WordPhoneme[]
+}
+
+model WordList {
+  id          Int              @id @default(autoincrement())
+  name        String           @unique
+  description String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  words       Word[]
+  activities  ActivityConfig[]
+}
+
+model Word {
+  id         Int            @id @default(autoincrement())
+  english    String // English match shown to students (e.g. "chair")
+  hint       String? // optional teacher hint (e.g. "You sit on it")
+  wordListId Int
+  wordList   WordList       @relation(fields: [wordListId], references: [id], onDelete: Cascade)
+  phonemes   WordPhoneme[]
+  activities ActivityWord[]
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  @@unique([wordListId, english])
+}
+
+model WordPhoneme {
+  wordId    Int
+  position  Int // 0-based order of the phoneme in the word
+  phonemeId Int
+  word      Word    @relation(fields: [wordId], references: [id], onDelete: Cascade)
+  phoneme   Phoneme @relation(fields: [phonemeId], references: [id], onDelete: Restrict)
+
+  @@id([wordId, position])
+  @@index([phonemeId])
+}
+
+model ActivityConfig {
+  id         Int          @id @default(autoincrement())
+  name       String // teacher-facing name in the activity library
+  type       ActivityType
+  difficulty Difficulty   @default(MEDIUM)
+  showHints  Boolean      @default(true)
+
+  // Wordle settings
+  maxGuesses Int? // 1 to 10
+
+  // Word Search settings
+  gridSize       Int? // 8 to 15
+  allowDiagonal  Boolean?
+  allowBackwards Boolean?
+
+  // Generated output settings
+  title        String // heading shown in the downloaded HTML file
+  authorName   String?
+  authorNumber String?
+  fileName     String? // download file name without the .html extension
+
+  simulated Boolean @default(false) // true for rows created by the usage simulator
+
+  wordListId  Int
+  wordList    WordList        @relation(fields: [wordListId], references: [id], onDelete: Cascade)
+  words       ActivityWord[]
+  generations GenerationLog[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([type])
+  @@index([wordListId])
+}
+
+model ActivityWord {
+  activityId Int
+  wordId     Int
+  position   Int // order the words appear in the activity
+  activity   ActivityConfig @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  word       Word           @relation(fields: [wordId], references: [id], onDelete: Cascade)
+
+  @@id([activityId, wordId])
+  @@index([wordId])
+}
+
+model GenerationLog {
+  id          Int            @id @default(autoincrement())
+  activityId  Int
+  activity    ActivityConfig @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  fileName    String
+  wordCount   Int
+  byteSize    Int
+  generatedAt DateTime       @default(now())
+
+  // Assessment 3: observability fields
+  status       GenerationStatus @default(SUCCESS)
+  kind         GenerationKind   @default(DOWNLOAD)
+  durationMs   Int              @default(0) // server time spent building the HTML
+  errorMessage String? // set when status is FAILED
+  simulated    Boolean          @default(false)
+
+  @@index([activityId])
+  @@index([generatedAt])
+  @@index([status])
+}
+
+// One row per period a visitor spent looking at a page. Used for the
+// "average time on page" statistic.
+model PageVisit {
+  id         Int      @id @default(autoincrement())
+  path       String
+  durationMs Int
+  simulated  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([path])
+  @@index([createdAt])
+}
