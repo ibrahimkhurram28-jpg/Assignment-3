@@ -1,0 +1,14 @@
+services:
+  phoneme-builder:
+    build: .
+    image: phoneme-builder:latest
+    container_name: phoneme-builder
+    init: true
+    ports:
+      - "3000:3000"
+    volumes:
+      - phoneme-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  phoneme-data:
